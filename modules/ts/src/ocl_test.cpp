@@ -156,6 +156,12 @@ void dumpOpenCLDevice()
         DUMP_MESSAGE_STDOUT("    Version = " << device.version());
         DUMP_PROPERTY_XML("cv_ocl_current_deviceVersion", device.version());
 
+        DUMP_MESSAGE_STDOUT("    Driver version = " << device.driverVersion());
+        DUMP_PROPERTY_XML("cv_ocl_current_driverVersion", device.driverVersion());
+
+        DUMP_MESSAGE_STDOUT("    Address bits = " << device.addressBits());
+        DUMP_PROPERTY_XML("cv_ocl_current_addressBits", device.addressBits());
+
         DUMP_MESSAGE_STDOUT("    Compute units = "<< device.maxComputeUnits());
         DUMP_PROPERTY_XML("cv_ocl_current_maxComputeUnits", device.maxComputeUnits());
 
@@ -177,6 +183,23 @@ void dumpOpenCLDevice()
         const char* isUnifiedMemoryStr = device.hostUnifiedMemory() ? "Yes" : "No";
         DUMP_MESSAGE_STDOUT("    Host unified memory = "<< isUnifiedMemoryStr);
         DUMP_PROPERTY_XML("cv_ocl_current_hostUnifiedMemory", device.hostUnifiedMemory());
+
+        DUMP_MESSAGE_STDOUT("    Device extensions:");
+        String extensionsStr = device.extensions();
+        size_t pos = 0;
+        while (pos < extensionsStr.size())
+        {
+            size_t pos2 = extensionsStr.find(' ', pos);
+            if (pos2 == String::npos)
+                pos2 = extensionsStr.size();
+            if (pos2 > pos)
+            {
+                String extensionName = extensionsStr.substr(pos, pos2 - pos);
+                DUMP_MESSAGE_STDOUT("        " << extensionName);
+            }
+            pos = pos2 + 1;
+        }
+        DUMP_PROPERTY_XML("cv_ocl_current_extensions", extensionsStr.c_str());
 
         const char* haveAmdBlasStr = haveAmdBlas() ? "Yes" : "No";
         DUMP_MESSAGE_STDOUT("    Has AMD Blas = "<< haveAmdBlasStr);
@@ -267,7 +290,7 @@ double TestUtils::checkRectSimilarity(const Size & sz, std::vector<Rect>& ob1, s
         cv::Mat cpu_result(sz, CV_8UC1);
         cpu_result.setTo(0);
 
-        for (vector<Rect>::const_iterator r = ob1.begin(); r != ob1.end(); r++)
+        for (vector<Rect>::const_iterator r = ob1.begin(); r != ob1.end(); ++r)
         {
             cv::Mat cpu_result_roi(cpu_result, *r);
             cpu_result_roi.setTo(1);
@@ -277,7 +300,7 @@ double TestUtils::checkRectSimilarity(const Size & sz, std::vector<Rect>& ob1, s
 
         cv::Mat gpu_result(sz, CV_8UC1);
         gpu_result.setTo(0);
-        for(vector<Rect>::const_iterator r2 = ob2.begin(); r2 != ob2.end(); r2++)
+        for(vector<Rect>::const_iterator r2 = ob2.begin(); r2 != ob2.end(); ++r2)
         {
             cv::Mat gpu_result_roi(gpu_result, *r2);
             gpu_result_roi.setTo(1);

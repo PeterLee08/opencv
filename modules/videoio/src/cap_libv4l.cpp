@@ -16,7 +16,7 @@ For Release:  OpenCV-Linux Beta4  opencv-0.9.6
 Tested On:    LMLBT44 with 8 video inputs
 Problems?     Post your questions at answers.opencv.org,
               Report bugs at code.opencv.org,
-              Submit your fixes at https://github.com/Itseez/opencv/
+              Submit your fixes at https://github.com/opencv/opencv/
 Patched Comments:
 
 TW: The cv cam utils that came with the initial release of OpenCV for LINUX Beta4
@@ -239,7 +239,7 @@ make & enjoy!
 
 #include "precomp.hpp"
 
-#if !defined WIN32 && defined HAVE_LIBV4L
+#if !defined _WIN32 && defined HAVE_LIBV4L
 
 #define CLEAR(x) memset (&(x), 0, sizeof (x))
 
@@ -312,6 +312,7 @@ typedef struct CvCaptureCAM_V4L
     int deviceHandle;
     int bufferIndex;
     int FirstCapture;
+    bool returnFrame;
 
     int width; int height;
     int mode;
@@ -392,27 +393,27 @@ static int xioctl( int fd, int request, void *arg)
    Returns the global numCameras with the correct value (we hope) */
 
 static void icvInitCapture_V4L() {
-   int deviceHandle;
-   int CameraNumber;
-   char deviceName[MAX_DEVICE_DRIVER_NAME];
+    int deviceHandle;
+    int CameraNumber;
+    char deviceName[MAX_DEVICE_DRIVER_NAME];
 
-   CameraNumber = 0;
-   while(CameraNumber < MAX_CAMERAS) {
-      /* Print the CameraNumber at the end of the string with a width of one character */
-      sprintf(deviceName, "/dev/video%1d", CameraNumber);
-      /* Test using an open to see if this new device name really does exists. */
-      deviceHandle = open(deviceName, O_RDONLY);
-      if (deviceHandle != -1) {
-         /* This device does indeed exist - add it to the total so far */
-    // add indexList
-    indexList|=(1 << CameraNumber);
-        numCameras++;
-    }
-    if (deviceHandle != -1)
-      close(deviceHandle);
-      /* Set up to test the next /dev/video source in line */
-      CameraNumber++;
-   } /* End while */
+    CameraNumber = 0;
+    while(CameraNumber < MAX_CAMERAS) {
+        /* Print the CameraNumber at the end of the string with a width of one character */
+        sprintf(deviceName, "/dev/video%1d", CameraNumber);
+        /* Test using an open to see if this new device name really does exists. */
+        deviceHandle = open(deviceName, O_RDONLY);
+        if (deviceHandle != -1) {
+            /* This device does indeed exist - add it to the total so far */
+            numCameras++;
+            // add indexList
+            indexList|=(1 << CameraNumber);
+        }
+        if (deviceHandle != -1)
+            close(deviceHandle);
+        /* Set up to test the next /dev/video source in line */
+        CameraNumber++;
+    } /* End while */
 
 }; /* End icvInitCapture_V4L */
 
@@ -1094,6 +1095,8 @@ static CvCaptureCAM_V4L * icvCaptureFromCAM_V4L (const char* deviceName)
        capture->is_v4l2_device = 1;
    }
 
+   capture->returnFrame = true;
+
    return capture;
 }; /* End icvOpenCAM_V4L */
 
@@ -1119,6 +1122,7 @@ static int read_frame_v4l2(CvCaptureCAM_V4L* capture) {
 
         default:
             /* display the error and stop processing */
+            capture->returnFrame = false;
             perror ("VIDIOC_DQBUF");
             return -1;
         }
@@ -1360,7 +1364,33 @@ static IplImage* icvRetrieveFrameCAM_V4L( CvCaptureCAM_V4L* capture, int) {
 
   }
 
-   return(&capture->frame);
+  if (capture->returnFrame)
+    return(&capture->frame);
+  else
+    return 0;
+}
+
+static int zeroPropertyQuietly(CvCaptureCAM_V4L* capture, int property_id, int value)
+{
+  struct v4l2_control c;
+  int v4l2_min;
+  int v4l2_max;
+  //we need to make sure that the autocontrol is switch off, if available.
+  capture->control.id = property_id;
+  v4l2_min = v4l2_get_ctrl_min(capture, capture->control.id);
+  v4l2_max = v4l2_get_ctrl_max(capture, capture->control.id);
+  if ( !((v4l2_min == -1) && (v4l2_max == -1)) ) {
+    //autocontrol capability is supported, switch it off.
+    c.id    = capture->control.id;
+    c.value = value;
+    if( v4l2_ioctl(capture->deviceHandle, VIDIOC_S_CTRL, &c) != 0 ){
+      if (errno != ERANGE) {
+        fprintf(stderr, "VIDEOIO ERROR: V4L2: Failed to set autocontrol \"%d\": %s (value %d)\n", c.id, strerror(errno), c.value);
+        return -1;
+      }
+    }
+  }//lack of support should not be considerred an error.
+  return 0;
 }
 
 /* TODO: review this adaptation */
@@ -1442,32 +1472,15 @@ static double icvGetPropertyCAM_V4L (CvCaptureCAM_V4L* capture,
       break;
     case CV_CAP_PROP_EXPOSURE:
       sprintf(name, "Exposure");
-      capture->control.id = V4L2_CID_EXPOSURE;
+      capture->control.id = V4L2_CID_EXPOSURE_ABSOLUTE;
       break;
-    case CV_CAP_PROP_FOCUS: {
-      struct v4l2_control c;
-      int v4l2_min;
-      int v4l2_max;
-      //we need to make sure that the autofocus is switch off, if available.
-      capture->control.id = V4L2_CID_FOCUS_AUTO;
-      v4l2_min = v4l2_get_ctrl_min(capture, capture->control.id);
-      v4l2_max = v4l2_get_ctrl_max(capture, capture->control.id);
-      if ( !((v4l2_min == -1) && (v4l2_max == -1)) ) {
-        //autofocus capability is supported, switch it off.
-        c.id    = capture->control.id;
-        c.value = 0;//off
-        if( v4l2_ioctl(capture->deviceHandle, VIDIOC_S_CTRL, &c) != 0 ){
-          if (errno != ERANGE) {
-            fprintf(stderr, "VIDEOIO ERROR: V4L2: Failed to set control \"%d\"(FOCUS_AUTO): %s (value %d)\n", c.id, strerror(errno), c.value);
-            return -1;
-          }
-        }
-      }//lack of support should not be considerred an error.
-
+    case CV_CAP_PROP_FOCUS:
       sprintf(name, "Focus");
       capture->control.id = V4L2_CID_FOCUS_ABSOLUTE;
       break;
-    }
+    case CV_CAP_PROP_AUTOFOCUS:
+      sprintf(name, "Autofocus");
+      capture->control.id = V4L2_CID_FOCUS_AUTO;
     default:
       sprintf(name, "<unknown property string>");
       capture->control.id = property_id;
@@ -1682,30 +1695,22 @@ static int icvSetControl (CvCaptureCAM_V4L* capture, int property_id, double val
       capture->control.id = V4L2_CID_GAIN;
       break;
     case CV_CAP_PROP_EXPOSURE:
+      //we need to make sure that the autoexposure is switch off, if available.
+      zeroPropertyQuietly(capture, V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL);
+      //now get the manual exposure value
       sprintf(name, "Exposure");
-      capture->control.id = V4L2_CID_EXPOSURE;
+      capture->control.id = V4L2_CID_EXPOSURE_ABSOLUTE;
       break;
     case CV_CAP_PROP_FOCUS:
       //we need to make sure that the autofocus is switch off, if available.
-      capture->control.id = V4L2_CID_FOCUS_AUTO;
-      v4l2_min = v4l2_get_ctrl_min(capture, capture->control.id);
-      v4l2_max = v4l2_get_ctrl_max(capture, capture->control.id);
-      if ( !((v4l2_min == -1) && (v4l2_max == -1)) ) {
-        //autofocus capability is supported, switch it off.
-        c.id    = capture->control.id;
-        c.value = 0;//off
-        if( v4l2_ioctl(capture->deviceHandle, VIDIOC_S_CTRL, &c) != 0 ){
-          if (errno != ERANGE) {
-            fprintf(stderr, "VIDEOIO ERROR: V4L2: Failed to set control \"%d\"(FOCUS_AUTO): %s (value %d)\n", c.id, strerror(errno), c.value);
-            return -1;
-          }
-        }
-      }//lack of support should not be considerred an error.
-
+      zeroPropertyQuietly(capture, V4L2_CID_FOCUS_AUTO, 0 /*off*/);
       //now set the manual focus
       sprintf(name, "Focus");
       capture->control.id = V4L2_CID_FOCUS_ABSOLUTE;
       break;
+    case CV_CAP_PROP_AUTOFOCUS:
+      sprintf(name, "Autofocus");
+      capture->control.id = V4L2_CID_FOCUS_AUTO;
     default:
       sprintf(name, "<unknown property string>");
       capture->control.id = property_id;
